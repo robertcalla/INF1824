@@ -1,0 +1,211 @@
+\documentclass[sigconf,nonacm]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{Bib\TeX}}}
+
+\acmConference[INF1824]{Projeto Orientado IV -- INF1824}{2026}{Rio de Janeiro, RJ, Brasil}
+\acmBooktitle{Relatório Técnico -- Projeto Orientado IV (INF1824), PUC-Rio}
+
+\begin{document}
+
+\title{Identificação e Correção de Gargalos de Level Design via Aprendizado por Reforço Profundo}
+
+\author{Robert Ronald Calla Maguiña}
+\affiliation{%
+  \institution{Departamento de Informática, PUC-Rio}
+  \city{Rio de Janeiro}
+  \state{RJ}
+  \country{Brasil}}
+%% Descomente e preencha com seu e-mail institucional, se desejar exibi-lo:
+%% \email{seu-email@aluno.puc-rio.br}
+
+\renewcommand{\shortauthors}{Calla Maguiña}
+
+\begin{abstract}
+Este trabalho relata o andamento do desenvolvimento de um sistema de
+Inteligência Artificial voltado à identificação e correção automática de
+gargalos de \emph{level design} em fases 2D baseadas em física. O ambiente de
+desenvolvimento é estruturado na engine Godot 4.7, com foco em mecânicas
+multiplayer. Diferentemente de abordagens tradicionais de navegação
+(\emph{pathfinding}), o objetivo é treinar um agente capaz de analisar a
+topologia do mapa, identificar zonas de estrangulamento que prejudicam a
+fluidez do jogo e sugerir adaptações de conteúdo para corrigi-las. A
+arquitetura proposta combina a extração estruturada do ambiente em uma
+matriz 2D, o processamento espacial por meio de Redes Neurais Convolucionais
+(CNN) e um agente de Aprendizado por Reforço Profundo (DRL) inspirado em
+conceitos de \emph{Curiosity-Driven Exploration} e de \emph{Procedural
+Content Generation via Reinforcement Learning} (PCGRL). Apresentamos o
+estado atual do projeto -- com a arquitetura geral validada -- e discutimos
+os próximos passos: a modelagem matemática da função de recompensa, a
+definição formal do espaço de ações e a integração de dados entre a engine e
+o ambiente de treinamento.
+\end{abstract}
+
+\keywords{Level Design, Aprendizado por Reforço Profundo, Geração
+  Procedural de Conteúdo, Curiosity-Driven Exploration, Godot Engine,
+  Playtesting Automatizado}
+
+\maketitle
+
+\section{Introdução}
+
+O \emph{level design} é um dos pilares da experiência de jogo, mas
+identificar manualmente pontos de fricção que prejudicam a fluidez de uma
+fase -- os chamados \emph{gargalos} -- é um processo custoso e dependente de
+extensas sessões de playtesting humano. Este trabalho relata o progresso da
+pesquisa e desenvolvimento de uma aplicação de Inteligência Artificial para
+identificação e correção desses gargalos. O ambiente de desenvolvimento está
+sendo estruturado na engine Godot 4.7, com foco no processamento de fases 2D
+baseadas em física e mecânicas multiplayer.
+
+O objetivo do projeto é ir além da simples navegação (\emph{pathfinding}). A
+meta é treinar um agente de aprendizado de máquina capaz de (i) analisar a
+topologia do mapa, (ii) identificar zonas de estrangulamento que prejudicam
+a fluidez do jogo e (iii) aplicar técnicas de geração de conteúdo para
+sugerir adaptações no cenário. Em outras palavras, o agente não deve apenas
+percorrer o nível, mas aprender a apontar --- e eventualmente corrigir ---
+falhas estruturais de design.
+
+As contribuições deste relatório de andamento são:
+\begin{itemize}
+  \item uma arquitetura de representação de ambiente independente de
+    renderização gráfica, baseada em matrizes 2D extraídas diretamente do
+    \texttt{TileMap} e do \texttt{NavigationServer2D} do Godot;
+  \item uma proposta de pipeline \emph{CNN + DRL} para transformar essa
+    representação em decisões de ação sobre o nível; e
+  \item a definição do escopo dos próximos passos necessários para a
+    formalização da função de recompensa e do espaço de ações do agente.
+\end{itemize}
+
+\section{Trabalhos Relacionados}
+
+O uso de aprendizado por reforço para geração e avaliação de conteúdo de
+jogos vem se consolidando como uma alternativa aos métodos tradicionais de
+geração procedural baseados em regras ou busca. Khalifa
+et~al.~\cite{khalifa2020pcgrl} propõem o PCGRL (\emph{Procedural Content
+Generation via Reinforcement Learning}), no qual a geração de níveis é
+formulada como um problema sequencial de decisão: um agente edita o mapa
+tile a tile e recebe recompensas conforme métricas de qualidade do nível
+resultante. Essa formulação inspira diretamente a representação de estado e
+o espaço de ação discutidos na Seção~\ref{sec:arquitetura} deste trabalho.
+
+Na frente de \emph{playtesting} automatizado, De Woillemont
+et~al.~\cite{dewoillemont2022automated} utilizam aprendizado por reforço
+para gerar agentes com estilos de jogo semelhantes aos humanos, permitindo
+testar um jogo sob perfis de comportamento variados sem depender de
+testadores humanos para cada iteração. Sestini
+et~al.~\cite{sestini2022automated} avançam essa linha propondo trajetórias
+proximais condicionadas por curiosidade (\emph{curiosity-conditioned
+proximal trajectories}) para validação automatizada de \emph{gameplay},
+combinando exploração guiada por curiosidade com métodos de otimização de
+política por região de confiança.
+
+O presente projeto se posiciona na interseção dessas duas linhas: assim
+como o PCGRL, utiliza uma representação matricial do nível como estado de
+um processo de decisão de Markov; e, assim como os trabalhos de
+\emph{playtesting} automatizado, incorpora exploração orientada por
+curiosidade -- não para gerar estilos de jogador, mas para que o próprio
+agente descubra e sinalize regiões do mapa com baixo fluxo de travessia,
+tratando a detecção de gargalos como o objetivo central da recompensa.
+
+\section{Arquitetura do Sistema e Tomada de Decisão}
+\label{sec:arquitetura}
+
+\subsection{Representação do Ambiente}
+
+Após avaliação da melhor estratégia de \emph{input} para a IA, descartou-se
+o uso de imagens diretas da câmera (renderização de pixels): o
+processamento de texturas e iluminação adicionaria um custo computacional
+desnecessário à rede neural.
+
+A solução estabelecida é a extração estruturada do mapa na forma de uma
+matriz 2D (\emph{grid}). Utilizando os recursos do Godot 4.7, mapeia-se o
+\texttt{TileMap} e as malhas do \texttt{NavigationServer2D} para gerar um
+\emph{array} bidimensional cujos valores representam os estados do
+terreno:
+\begin{itemize}
+  \item \textbf{0}: caminho livre e navegável;
+  \item \textbf{1}: parede ou obstáculo rígido.
+\end{itemize}
+
+Nesta etapa do projeto arquitetural, a geração dessa matriz limpa pelo
+Godot foi isolada como uma ``caixa preta'' já funcional, permitindo
+dedicação integral à modelagem da IA.
+
+\subsection{Processamento Espacial com Redes Convolucionais (CNN)}
+
+A matriz 2D gerada atua como a observação (\emph{state}) para a rede
+neural. Para extrair os padrões topológicos desse ambiente espacial ---
+como corredores estreitos, rotas críticas e densidade de obstáculos --- os
+dados passam por uma \emph{Deep Convolutional Network} (CNN). A natureza
+das CNNs permite que o modelo compreenda o nível de forma geométrica, em
+vez de apenas ler números isolados, o que é essencial para reconhecer
+padrões espaciais que caracterizam um gargalo.
+
+\subsection{Agente de Deep Reinforcement Learning (DRL)}
+
+A tomada de decisão e a exploração do mapa utilizam uma arquitetura de
+Aprendizado por Reforço Profundo. O modelo é construído com base em
+conceitos avançados da literatura, unindo \emph{Curiosity-Driven
+Exploration} com as bases do PCGRL~\cite{khalifa2020pcgrl}. A
+Tabela~\ref{tab:drl} resume os três componentes centrais do sistema.
+
+\begin{table}
+  \caption{Componentes do sistema de Aprendizado por Reforço Profundo}
+  \label{tab:drl}
+  \begin{tabular}{p{0.28\linewidth}p{0.6\linewidth}}
+    \toprule
+    \textbf{Componente} & \textbf{Estratégia no projeto} \\
+    \midrule
+    Observação (\emph{State}) & A matriz 2D processada pela CNN,
+      representando a topologia instantânea da fase. \\
+    Ação (\emph{Action}) & Navegação vetorial e, posteriormente, a
+      capacidade de sinalizar ou modificar tiles (adicionar/remover
+      bloqueios). \\
+    Recompensa (\emph{Reward}) & O núcleo do sistema: a função matemática
+      penaliza fortemente áreas de baixo fluxo de travessia (gargalos),
+      ensinando o agente a destacar essas falhas no design. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Estado Atual e Trabalhos Futuros}
+
+Com a comunicação base e o escopo da IA (matriz 2D~$\rightarrow$~CNN~$
+\rightarrow$~DRL) validados e definidos, o projeto avança para a
+estruturação formal do aprendizado de máquina. Os próximos passos incluem:
+
+\begin{enumerate}
+  \item \textbf{Modelagem matemática da recompensa:} rascunhar a lógica
+    matemática da \emph{reward function}, definindo os pesos de
+    penalização para os gargalos de \emph{level design};
+  \item \textbf{Definição do espaço de ação:} estruturar formalmente quais
+    movimentações e alterações o agente poderá realizar dentro da matriz
+    durante os episódios de treinamento;
+  \item \textbf{Integração de dados:} planejar a exportação contínua da
+    matriz do Godot para o ambiente de treinamento do modelo.
+\end{enumerate}
+
+\section{Conclusão}
+
+Este relatório descreveu a arquitetura em desenvolvimento de um agente de
+Aprendizado por Reforço Profundo para identificação e correção de gargalos
+de \emph{level design} em jogos 2D construídos na engine Godot. A
+representação do ambiente como matriz 2D, processada por uma CNN e
+consumida por um agente de DRL inspirado em PCGRL e em exploração guiada
+por curiosidade, oferece um caminho concreto para ir além do
+\emph{pathfinding} tradicional. Os trabalhos futuros mais imediatos --
+formalização da função de recompensa, do espaço de ações e da integração de
+dados -- consolidarão a base necessária para os primeiros experimentos de
+treinamento do agente.
+
+\begin{acks}
+Agradecemos ao Prof.\ Augusto Baffa pela orientação ao longo do
+desenvolvimento deste projeto, no âmbito da disciplina Projeto Orientado IV
+(INF1824) da PUC-Rio.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}
