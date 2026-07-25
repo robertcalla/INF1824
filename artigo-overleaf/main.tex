@@ -1,411 +1,413 @@
-\documentclass[sigconf,nonacm]{acmart}
+\documentclass[sigconf,nonacm,language=english]{acmart}
 
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric,arrows.meta,positioning,matrix}
+\usepackage{booktabs}
 
 \AtBeginDocument{%
   \providecommand\BibTeX{{Bib\TeX}}}
 
-\acmConference[INF1824]{Projeto Orientado IV -- INF1824}{2026}{Rio de Janeiro, RJ, Brasil}
-\acmBooktitle{Relatório Técnico -- Projeto Orientado IV (INF1824), PUC-Rio}
+\acmConference[INF1824]{Projeto Orientado IV -- INF1824}{2026}{Rio de Janeiro, RJ, Brazil}
+\acmBooktitle{Technical Report -- Projeto Orientado IV (INF1824), PUC-Rio}
 
 \begin{document}
 
-\title{Identificação e Correção de Gargalos de Level Design via Aprendizado por Reforço Profundo}
+\title{Identifying and Correcting Level Design Bottlenecks via Deep Reinforcement Learning}
 
 \author{Robert Ronald Calla Maguiña}
 \affiliation{%
-  \institution{Departamento de Informática, PUC-Rio}
+  \institution{Department of Informatics, PUC-Rio}
   \city{Rio de Janeiro}
   \state{RJ}
-  \country{Brasil}}
-%% Descomente e preencha com seu e-mail institucional, se desejar exibi-lo:
-%% \email{seu-email@aluno.puc-rio.br}
+  \country{Brazil}}
+%% Uncomment and fill in with your institutional e-mail if you want it shown:
+%% \email{your-email@aluno.puc-rio.br}
 
 \renewcommand{\shortauthors}{Calla Maguiña}
 
 \begin{abstract}
-Este trabalho relata o andamento do desenvolvimento de um sistema de
-Inteligência Artificial voltado à identificação e correção automática de
-gargalos de \emph{level design} em fases 2D baseadas em física. O ambiente de
-desenvolvimento é estruturado na engine Godot 4.7, com foco no processamento
-de mecânicas multiplayer. Diferentemente de abordagens tradicionais de
-navegação (\emph{pathfinding}), o objetivo é treinar um agente capaz de
-analisar a topologia do mapa, identificar zonas de estrangulamento que
-prejudicam a fluidez do jogo e aplicar técnicas de geração de conteúdo para
-sugerir adaptações no cenário. Propomos uma arquitetura que combina a
-extração estruturada do ambiente em uma matriz 2D, o processamento espacial
-por meio de Redes Neurais Convolucionais (CNN) e um agente de Aprendizado por
-Reforço Profundo (DRL) inspirado em conceitos de \emph{Curiosity-Driven
-Exploration} e de \emph{Procedural Content Generation via Reinforcement
-Learning} (PCGRL). Formalizamos o problema como um Processo de Decisão de
-Markov, detalhamos as decisões de projeto para cada componente do pipeline
-(representação de estado, extrator convolucional, política e função de
-recompensa híbrida intrínseca/extrínseca), descrevemos o estado atual da
-implementação e propomos uma metodologia de avaliação -- com métricas,
-baselines e protocolo experimental -- para os próximos ciclos do projeto.
-Discutimos ainda as limitações e os riscos de \emph{reward hacking}
-inerentes à abordagem, bem como um roteiro de trabalhos futuros.
+This work reports on the progress of an Artificial Intelligence system aimed
+at automatically identifying and correcting \emph{level design} bottlenecks
+in physics-based 2D stages. The development environment is built on the
+Godot~4.7 engine, targeting multiplayer mechanics. Unlike traditional
+navigation (\emph{pathfinding}) approaches, the goal is to train an agent
+capable of analyzing the topology of a map, identifying congestion zones
+that hinder gameplay flow, and applying content-generation techniques to
+suggest scenario adaptations. We propose an architecture that combines a
+structured 2D-grid representation of the environment, spatial feature
+extraction via a Convolutional Neural Network (CNN), and a Deep
+Reinforcement Learning (DRL) agent inspired by \emph{Curiosity-Driven
+Exploration} and \emph{Procedural Content Generation via Reinforcement
+Learning} (PCGRL). We formalize the problem as a Markov Decision Process,
+specify a concrete network architecture (convolutional feature extractor,
+actor-critic heads, and Intrinsic Curiosity Module) together with a
+reference set of PPO hyperparameters, describe the current implementation
+status, and lay out an evaluation methodology -- with explicitly defined
+metrics, baselines, and an experimental protocol -- for the next
+development cycles. As of this writing, agent training has not yet been
+executed; no performance results are reported, and every number in
+Section~\ref{sec:arquitetura} is a proposed design choice to be tuned
+empirically, not an outcome of a completed experiment. We also discuss the
+main methodological risks, most notably \emph{reward hacking}, and outline
+a roadmap of future work.
 \end{abstract}
 
-\keywords{Level Design, Aprendizado por Reforço Profundo, Geração
-  Procedural de Conteúdo, Curiosity-Driven Exploration, Godot Engine,
-  Playtesting Automatizado, Redes Neurais Convolucionais}
+\keywords{Level Design, Deep Reinforcement Learning, Procedural Content
+  Generation, Curiosity-Driven Exploration, Godot Engine, Automated
+  Playtesting, Convolutional Neural Networks, Proximal Policy Optimization}
 
 \maketitle
 
-\section{Introdução}
+\section{Introduction}
 
-O \emph{level design} é um dos pilares da experiência de jogo: a forma como
-corredores, salas, obstáculos e rotas alternativas são dispostos determina
-diretamente o ritmo, a dificuldade percebida e a fluidez com que o jogador
-avança pela fase. Contudo, identificar manualmente pontos de fricção que
-prejudicam essa fluidez -- os chamados \emph{gargalos} (\emph{bottlenecks})
--- é um processo custoso, subjetivo e dependente de extensas sessões de
-\emph{playtesting} humano. Em produções com ciclos de iteração curtos, ou em
-fases geradas proceduralmente, esse custo se torna ainda mais crítico, pois
-cada nova versão do nível exigiria uma nova rodada de testes manuais.
+\emph{Level design} is one of the pillars of the player experience: the way
+corridors, rooms, obstacles, and alternative routes are arranged directly
+determines the pacing, the perceived difficulty, and the fluidity with
+which a player progresses through a stage. However, manually identifying
+friction points that hurt this fluidity -- so-called \emph{bottlenecks} --
+is a costly, subjective process that depends on extensive human
+\emph{playtesting} sessions. In productions with short iteration cycles, or
+in procedurally generated stages, this cost becomes even more critical,
+since every new version of a level would require a new round of manual
+testing.
 
-Este trabalho relata o progresso da pesquisa e desenvolvimento de uma
-aplicação de Inteligência Artificial para identificação e correção desses
-gargalos. O ambiente de desenvolvimento está sendo estruturado na engine
-Godot 4.7~\cite{godotengine}, com foco no processamento de fases 2D baseadas
-em física e mecânicas multiplayer, um domínio no qual gargalos de
-navegação afetam não apenas um jogador isolado, mas a dinâmica de disputa
-por espaço entre múltiplos agentes.
+This work reports on the progress of research and development of an
+Artificial Intelligence application for identifying and correcting these
+bottlenecks. The development environment is being built on the
+Godot~4.7~\cite{godotengine} engine, focusing on physics-based 2D stages
+and multiplayer mechanics -- a domain in which navigation bottlenecks
+affect not just a single player, but the dynamics of multiple agents
+competing for the same space.
 
-\subsection{Motivação}
+\subsection{Motivation}
 
-A motivação central do projeto é que ferramentas automáticas de
-\emph{playtesting} baseadas em IA podem reduzir o custo de iteração do
-processo de \emph{level design}, permitindo que designers recebam
-retroalimentação quantitativa sobre a qualidade estrutural de um nível antes
-mesmo de exposê-lo a testadores humanos. Diferente de heurísticas estáticas
-de análise de grafos (por exemplo, medidas de centralidade sobre o grafo de
-navegabilidade), um agente treinado por reforço pode capturar efeitos
-dinâmicos do \emph{gameplay} -- como congestionamento causado por múltiplos
-jogadores disputando o mesmo corredor -- que não são triviais de expressar
-como regra fixa.
+The central motivation of this project is that automated, AI-based
+playtesting tools can reduce the iteration cost of the level-design
+process, allowing designers to receive quantitative feedback about a
+level's structural quality before ever exposing it to human testers.
+Unlike static graph-analysis heuristics (for example, centrality measures
+over the navigability graph), a reinforcement-learning agent can capture
+dynamic gameplay effects -- such as congestion caused by multiple players
+competing for the same corridor -- that are not trivial to express as a
+fixed rule.
 
-\subsection{Definição do Problema}
+\subsection{Problem Statement}
 
-O objetivo do projeto é ir além da simples navegação (\emph{pathfinding}).
-A meta é treinar um agente de aprendizado de máquina capaz de:
+The goal of the project is to go beyond simple navigation
+(\emph{pathfinding}). The aim is to train a machine-learning agent capable
+of:
 \begin{enumerate}
-  \item analisar a topologia do mapa a partir de uma representação
-    estruturada e independente de renderização gráfica;
-  \item identificar zonas de estrangulamento que prejudicam a fluidez do
-    jogo, isto é, regiões do mapa em que o fluxo de travessia entre pontos
-    de interesse é anormalmente baixo; e
-  \item aplicar técnicas de geração de conteúdo para sugerir adaptações no
-    cenário que aliviem esses gargalos, fechando o ciclo entre diagnóstico
-    e correção.
+  \item analyzing the topology of the map from a structured representation
+    that is independent of graphical rendering;
+  \item identifying congestion zones that hurt gameplay flow, i.e., regions
+    of the map where the traversal flow between points of interest is
+    abnormally low; and
+  \item applying content-generation techniques to suggest scenario
+    adaptations that alleviate these bottlenecks, closing the loop between
+    diagnosis and correction.
 \end{enumerate}
-Em outras palavras, o agente não deve apenas percorrer o nível, mas
-aprender a apontar -- e eventualmente corrigir -- falhas estruturais de
-\emph{design}.
+In other words, the agent should not merely traverse the level, but learn
+to point out -- and eventually correct -- structural design flaws.
 
-\subsection{Contribuições}
+\subsection{Contributions}
 
-As contribuições deste relatório de andamento são:
+The contributions of this progress report are:
 \begin{itemize}
-  \item uma arquitetura de representação de ambiente independente de
-    renderização gráfica, baseada em matrizes 2D extraídas diretamente do
-    \texttt{TileMap} e do \texttt{NavigationServer2D} do Godot;
-  \item uma formalização do problema como um Processo de Decisão de Markov
-    (MDP), com espaço de estados, espaço de ações e uma proposta de função
-    de recompensa híbrida (intrínseca + extrínseca);
-  \item uma proposta de pipeline \emph{CNN~+~DRL} para transformar essa
-    representação em decisões de ação sobre o nível, incluindo a escolha
-    justificada do algoritmo de otimização de política e do módulo de
-    curiosidade;
-  \item uma metodologia de avaliação planejada, com métricas, baselines e
-    protocolo experimental, ainda a ser executada nos próximos ciclos do
-    projeto; e
-  \item uma discussão inicial sobre limitações e riscos metodológicos,
-    notadamente o risco de \emph{reward hacking}.
+  \item an environment-representation architecture that is independent of
+    graphical rendering, based on 2D matrices extracted directly from
+    Godot's \texttt{TileMap} and \texttt{NavigationServer2D};
+  \item a formalization of the problem as a Markov Decision Process (MDP),
+    with a state space, an action space, and a proposed hybrid
+    (intrinsic~+~extrinsic) reward function;
+  \item a concrete, fully specified network architecture -- convolutional
+    feature extractor, actor-critic heads, and Intrinsic Curiosity Module
+    -- together with a reference set of PPO hyperparameters, proposed as a
+    starting point for the upcoming implementation;
+  \item a planned evaluation methodology, with explicitly defined metrics
+    (including their formulas), baselines, and an experimental protocol,
+    still to be executed in the next project cycles; and
+  \item an initial discussion of methodological limitations and risks,
+    most notably the risk of \emph{reward hacking}.
 \end{itemize}
 
-\subsection{Organização do Documento}
+\subsection{Report Organization}
 
-O restante deste artigo está organizado da seguinte forma. A
-Seção~\ref{sec:relacionados} discute trabalhos relacionados em geração
-procedural de conteúdo via aprendizado por reforço, \emph{playtesting}
-automatizado e exploração guiada por curiosidade. A
-Seção~\ref{sec:formalizacao} formaliza o problema como um MDP. A
-Seção~\ref{sec:arquitetura} detalha a arquitetura do sistema proposto. A
-Seção~\ref{sec:estado} descreve o estado atual da implementação. A
-Seção~\ref{sec:avaliacao} propõe a metodologia de avaliação. A
-Seção~\ref{sec:discussao} discute limitações e riscos. A
-Seção~\ref{sec:etica} discute considerações éticas e de uso responsável. A
-Seção~\ref{sec:futuro} apresenta o roteiro de trabalhos futuros, e a
-Seção~\ref{sec:conclusao} conclui o artigo.
+The remainder of this article is organized as follows.
+Section~\ref{sec:relacionados} discusses related work in procedural content
+generation via reinforcement learning, automated playtesting, and
+curiosity-driven exploration. Section~\ref{sec:formalizacao} formalizes the
+problem as an MDP. Section~\ref{sec:arquitetura} details the proposed
+system architecture, including the network design and hyperparameters.
+Section~\ref{sec:estado} describes the current implementation status.
+Section~\ref{sec:avaliacao} proposes the evaluation methodology.
+Section~\ref{sec:discussao} discusses limitations and risks.
+Section~\ref{sec:etica} discusses ethical considerations and responsible
+use. Section~\ref{sec:futuro} presents the future-work roadmap, and
+Section~\ref{sec:conclusao} concludes the article.
 
-\section{Trabalhos Relacionados}
+\section{Related Work}
 \label{sec:relacionados}
 
-O uso de aprendizado por reforço para geração e avaliação de conteúdo de
-jogos vem se consolidando como uma alternativa aos métodos tradicionais de
-geração procedural baseados em regras ou busca (\emph{search-based
-PCG})~\cite{shaker2016procedural}. Esta seção revisa três frentes que
-sustentam a arquitetura proposta: geração procedural via aprendizado por
-reforço, \emph{playtesting} automatizado com agentes humanoides, e
-exploração guiada por curiosidade.
+The use of reinforcement learning for game-content generation and
+evaluation has been consolidating as an alternative to traditional
+rule-based or search-based procedural content generation
+(PCG)~\cite{shaker2016procedural}. This section reviews three lines of work
+that underpin the proposed architecture: procedural content generation via
+reinforcement learning, automated playtesting with human-like agents, and
+curiosity-driven exploration.
 
-\subsection{Geração Procedural de Conteúdo via Aprendizado por Reforço}
+\subsection{Procedural Content Generation via Reinforcement Learning}
 
-Khalifa et~al.~\cite{khalifa2020pcgrl} propõem o PCGRL (\emph{Procedural
-Content Generation via Reinforcement Learning}), no qual a geração de
-níveis é formulada como um problema sequencial de decisão: um agente edita
-o mapa tile a tile e recebe recompensas conforme métricas de qualidade do
-nível resultante (por exemplo, conectividade, número de inimigos alcançáveis
-ou tamanho do caminho mais curto). Diferentemente de modelos generativos
-treinados por aprendizado supervisionado sobre corpora de níveis existentes,
-o PCGRL não depende de grandes conjuntos de dados anotados, e sim de uma
-função de recompensa bem definida sobre o espaço de níveis -- uma
-característica central que buscamos reaproveitar neste projeto. Essa
-formulação inspira diretamente a representação de estado e o espaço de ação
-discutidos na Seção~\ref{sec:arquitetura} deste trabalho.
+Khalifa et~al.~\cite{khalifa2020pcgrl} propose PCGRL (\emph{Procedural
+Content Generation via Reinforcement Learning}), in which level generation
+is formulated as a sequential decision-making problem: an agent edits the
+map tile by tile and receives rewards according to quality metrics of the
+resulting level (for example, connectivity, number of reachable enemies, or
+shortest-path length). Unlike generative models trained through supervised
+learning on corpora of existing levels, PCGRL does not depend on large
+annotated datasets, but on a well-defined reward function over the space of
+levels -- a central characteristic that we aim to reuse in this project.
+This formulation directly inspires the state representation and action
+space discussed in Section~\ref{sec:arquitetura} of this work.
 
-\subsection{Playtesting Automatizado com Agentes Humanoides}
+\subsection{Automated Playtesting with Human-Like Agents}
 
-Na frente de \emph{playtesting} automatizado, De Woillemont
-et~al.~\cite{dewoillemont2022automated} utilizam aprendizado por reforço
-para gerar agentes com estilos de jogo semelhantes aos humanos, permitindo
-testar um jogo sob perfis de comportamento variados sem depender de
-testadores humanos para cada iteração. Essa linha de trabalho parte da
-premissa de que um agente puramente ótimo (por exemplo, um agente que
-sempre encontra o caminho mais curto) não é representativo do comportamento
-real de jogadores, que exploram, hesitam e cometem erros. Sestini
-et~al.~\cite{sestini2022automated} avançam essa linha propondo trajetórias
-proximais condicionadas por curiosidade (\emph{curiosity-conditioned
-proximal trajectories}) para validação automatizada de \emph{gameplay},
-combinando exploração guiada por curiosidade com métodos de otimização de
-política por região de confiança para detectar estados de jogo raros ou
-problemáticos (por exemplo, situações de \emph{softlock} ou exploração de
-\emph{bugs}).
+On the automated-playtesting front, De~Woillemont
+et~al.~\cite{dewoillemont2022automated} use reinforcement learning to
+generate agents with human-like play styles, enabling a game to be tested
+under varied behavior profiles without relying on human testers for every
+iteration. This line of work starts from the premise that a purely optimal
+agent (for example, one that always finds the shortest path) is not
+representative of real player behavior, since players explore, hesitate,
+and make mistakes. Sestini et~al.~\cite{sestini2022automated} extend this
+line by proposing curiosity-conditioned proximal trajectories for automated
+\emph{gameplay} validation, combining curiosity-guided exploration with
+trust-region policy-optimization methods to detect rare or problematic game
+states (for example, \emph{softlock} situations or bug exploitation).
 
-\subsection{Exploração Guiada por Curiosidade}
+\subsection{Curiosity-Driven Exploration}
 
-O componente de exploração guiada por curiosidade utilizado neste projeto
-segue a formulação do \emph{Intrinsic Curiosity Module} (ICM) proposta por
-Pathak et~al.~\cite{pathak2017curiosity}, na qual um modelo preditivo
-aprende a antecipar a representação latente do próximo estado a partir do
-estado e da ação atuais; o erro dessa predição é utilizado como recompensa
-intrínseca, incentivando o agente a visitar regiões do ambiente cuja
-dinâmica ainda não foi bem modelada. Esse mecanismo é particularmente
-adequado ao nosso cenário, pois gargalos de \emph{level design} tendem a
-corresponder a regiões pouco visitadas por políticas ingênuas de navegação,
-exatamente as regiões que um sinal de curiosidade tende a priorizar.
+The curiosity-guided exploration component used in this project follows
+the formulation of the Intrinsic Curiosity Module (ICM) proposed by Pathak
+et~al.~\cite{pathak2017curiosity}, in which a predictive model learns to
+anticipate the latent representation of the next state from the current
+state and action; the prediction error is used as an intrinsic reward,
+encouraging the agent to visit regions of the environment whose dynamics
+have not yet been well modeled. This mechanism is particularly well suited
+to our scenario, since level-design bottlenecks tend to correspond to
+regions that are seldom visited by naive navigation policies -- exactly the
+regions that a curiosity signal tends to prioritize.
 
-\subsection{Posicionamento deste Trabalho}
+\subsection{Positioning of This Work}
 
-A Tabela~\ref{tab:relacionados} resume o posicionamento do presente
-trabalho em relação aos três trabalhos discutidos. O projeto se posiciona
-na interseção dessas linhas: assim como o PCGRL, utiliza uma representação
-matricial do nível como estado de um processo de decisão de Markov; e,
-assim como os trabalhos de \emph{playtesting} automatizado, incorpora
-exploração orientada por curiosidade -- não para gerar estilos de jogador,
-mas para que o próprio agente descubra e sinalize regiões do mapa com
-baixo fluxo de travessia, tratando a detecção de gargalos como o objetivo
-central da recompensa, e não apenas como um subproduto da exploração.
+Table~\ref{tab:relacionados} summarizes how the present work relates to the
+three works discussed above. This project sits at the intersection of
+these lines: like PCGRL, it uses a matrix-based level representation as the
+state of a Markov decision process; and, like the automated-playtesting
+works, it incorporates curiosity-guided exploration -- not to generate
+player styles, but so that the agent itself discovers and flags regions of
+the map with low traversal flow, treating bottleneck detection as the
+central objective of the reward, rather than merely a by-product of
+exploration.
 
 \begin{table}
-  \caption{Posicionamento em relação aos trabalhos relacionados}
+  \caption{Positioning relative to related work}
   \label{tab:relacionados}
   \begin{tabular}{p{0.24\linewidth}p{0.62\linewidth}}
     \toprule
-    \textbf{Trabalho} & \textbf{Foco principal} \\
+    \textbf{Work} & \textbf{Main focus} \\
     \midrule
-    PCGRL~\cite{khalifa2020pcgrl} & Geração de níveis tile a tile via RL,
-      recompensa sobre métricas globais de qualidade do nível. \\
-    De~Woillemont et~al.~\cite{dewoillemont2022automated} & Geração de
-      agentes de \emph{playtesting} com estilos de jogo humanoides. \\
-    Sestini et~al.~\cite{sestini2022automated} & Validação automatizada de
-      \emph{gameplay} via exploração condicionada por curiosidade. \\
-    \textbf{Este trabalho} & Diagnóstico e sinalização de gargalos de
-      \emph{level design} como objetivo central da recompensa, combinando
-      representação matricial (PCGRL) com curiosidade (ICM) para priorizar
-      regiões de baixo fluxo. \\
+    PCGRL~\cite{khalifa2020pcgrl} & Tile-by-tile level generation via RL,
+      reward over global level-quality metrics. \\
+    De~Woillemont et~al.~\cite{dewoillemont2022automated} & Generation of
+      playtesting agents with human-like play styles. \\
+    Sestini et~al.~\cite{sestini2022automated} & Automated gameplay
+      validation via curiosity-conditioned exploration. \\
+    \textbf{This work} & Diagnosis and flagging of level-design bottlenecks
+      as the central reward objective, combining matrix representation
+      (PCGRL) with curiosity (ICM) to prioritize low-flow regions. \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\section{Formalização do Problema}
+\section{Problem Formalization}
 \label{sec:formalizacao}
 
-\subsection{Gargalos de Level Design}
+\subsection{Level Design Bottlenecks}
 
-Definimos informalmente um gargalo como uma região do nível cujo fluxo de
-travessia -- o número de vezes que agentes passam por aquela região durante
-um episódio de \emph{gameplay}, normalizado pelo tempo total do episódio --
-é significativamente menor do que o esperado para uma região com
-conectividade equivalente no grafo de navegação. Essa definição captura
-tanto gargalos ``estruturais'' (um corredor estreito que fisicamente limita
-a passagem simultânea de múltiplos jogadores) quanto gargalos
-``comportamentais'' (uma bifurcação que jogadores tendem a evitar por
-parecer, subjetivamente, menos vantajosa).
+We informally define a bottleneck as a region of the level whose traversal
+flow -- the number of times agents pass through that region during a
+gameplay episode, normalized by the total episode duration -- is
+significantly lower than expected for a region with equivalent
+connectivity in the navigation graph. This definition captures both
+``structural'' bottlenecks (a narrow corridor that physically limits the
+simultaneous passage of multiple players) and ``behavioral'' bottlenecks (a
+fork that players tend to avoid because it subjectively seems less
+advantageous).
 
-\subsection{Processo de Decisão de Markov}
+\subsection{Markov Decision Process}
 
-Modelamos o problema como um Processo de Decisão de Markov (MDP)
-$\langle \mathcal{S}, \mathcal{A}, P, R, \gamma \rangle$, no qual:
+We model the problem as a Markov Decision Process (MDP) $\langle
+\mathcal{S}, \mathcal{A}, P, R, \gamma \rangle$, in which:
 
 \begin{itemize}
-  \item $\mathcal{S}$ é o espaço de estados, definido pela matriz 2D
-    $G \in \{0,1\}^{H \times W}$ que representa o nível (Seção~\ref{sec:representacao}),
-    possivelmente aumentada por canais adicionais que codificam a posição
-    do agente e de pontos de interesse (entrada, saída, itens);
-  \item $\mathcal{A}$ é o espaço de ações, detalhado na
-    Seção~\ref{sec:acao};
-  \item $P(s_{t+1} \mid s_t, a_t)$ é a dinâmica de transição, determinada
-    pelo motor de física e navegação do Godot;
-  \item $R(s_t, a_t, s_{t+1})$ é a função de recompensa, detalhada na
-    Seção~\ref{sec:recompensa}; e
-  \item $\gamma \in [0,1)$ é o fator de desconto.
+  \item $\mathcal{S}$ is the state space, defined by the 2D matrix $G \in
+    \{0,1\}^{H \times W}$ that represents the level
+    (Section~\ref{sec:representacao}), possibly augmented with additional
+    channels encoding the agent's position and points of interest
+    (entrance, exit, items);
+  \item $\mathcal{A}$ is the action space, detailed in
+    Section~\ref{sec:acao};
+  \item $P(s_{t+1} \mid s_t, a_t)$ is the transition dynamics, determined
+    by Godot's physics and navigation engine;
+  \item $R(s_t, a_t, s_{t+1})$ is the reward function, detailed in
+    Section~\ref{sec:recompensa}; and
+  \item $\gamma \in [0,1)$ is the discount factor.
 \end{itemize}
 
-O objetivo do treinamento é encontrar uma política $\pi_\theta(a_t \mid
-s_t)$, parametrizada por uma rede neural com parâmetros $\theta$, que
-maximize o retorno esperado
+The training objective is to find a policy $\pi_\theta(a_t \mid s_t)$,
+parameterized by a neural network with parameters $\theta$, that maximizes
+the expected return
 \begin{equation}
   J(\theta) = \mathbb{E}_{\pi_\theta}\!\left[ \sum_{t=0}^{T} \gamma^t
   R(s_t, a_t, s_{t+1}) \right].
   \label{eq:objective}
 \end{equation}
 
-\subsection{Espaço de Estados}
+\subsection{State Space}
 \label{sec:representacao}
 
-O estado observado pelo agente em cada instante $t$ é a matriz $G_t$
-descrita na Seção~\ref{sec:representacao-ambiente}, processada por um
-extrator convolucional $\phi(\cdot)$ (Seção~\ref{sec:cnn}) que produz um
-vetor de características latente $z_t = \phi(G_t) \in \mathbb{R}^d$. Esse
-vetor latente é a entrada tanto da rede de política quanto do módulo de
-curiosidade.
+The state observed by the agent at each instant $t$ is the matrix $G_t$
+described in Section~\ref{sec:representacao-ambiente}, processed by a
+convolutional feature extractor $\phi(\cdot)$ (Section~\ref{sec:cnn}) that
+produces a latent feature vector $z_t = \phi(G_t) \in \mathbb{R}^d$. This
+latent vector is the input to both the policy network and the curiosity
+module.
 
-\subsection{Espaço de Ações}
+\subsection{Action Space}
 \label{sec:acao}
 
-Propomos um espaço de ações híbrido, refletindo a natureza em duas fases do
-problema (navegação e, posteriormente, edição de conteúdo):
+We propose a hybrid action space, reflecting the two-phase nature of the
+problem (navigation and, later, content editing):
 \begin{itemize}
-  \item \textbf{Ações de navegação}: um vetor de deslocamento discreto
-    $a^{\text{nav}} \in \{\text{norte}, \text{sul}, \text{leste},
-    \text{oeste}, \text{parado}\}$, compatível com a granularidade da
-    matriz de \emph{tiles};
-  \item \textbf{Ações de sinalização/edição} (fase posterior do projeto):
-    $a^{\text{edit}} \in \{\text{nenhuma}, \text{marcar gargalo},
-    \text{remover bloqueio}, \text{adicionar bloqueio}\}$, aplicadas à
-    célula da matriz correspondente à posição atual do agente.
+  \item \textbf{Navigation actions}: a discrete displacement vector
+    $a^{\text{nav}} \in \{\text{north}, \text{south}, \text{east},
+    \text{west}, \text{stay}\}$, matching the granularity of the tile
+    matrix;
+  \item \textbf{Flagging/editing actions} (later project phase):
+    $a^{\text{edit}} \in \{\text{none}, \text{flag bottleneck}, \text{remove
+    blockage}, \text{add blockage}\}$, applied to the matrix cell
+    corresponding to the agent's current position.
 \end{itemize}
-Na fase atual do projeto, apenas $a^{\text{nav}}$ está em uso; o espaço de
-edição será incorporado progressivamente, conforme discutido na
-Seção~\ref{sec:futuro}.
+In the current project phase, only $a^{\text{nav}}$ is in use; the editing
+space will be incorporated progressively, as discussed in
+Section~\ref{sec:futuro}.
 
-\subsection{Função de Recompensa}
+\subsection{Reward Function}
 \label{sec:recompensa}
 
-Propomos uma função de recompensa híbrida, combinando um termo extrínseco
-$r^{\text{ext}}_t$, responsável por penalizar gargalos, e um termo
-intrínseco $r^{\text{int}}_t$, responsável por guiar a exploração:
+We propose a hybrid reward function, combining an extrinsic term
+$r^{\text{ext}}_t$, responsible for penalizing bottlenecks, and an
+intrinsic term $r^{\text{int}}_t$, responsible for guiding exploration:
 \begin{equation}
   R(s_t, a_t, s_{t+1}) = r^{\text{ext}}_t + \beta \, r^{\text{int}}_t,
   \label{eq:reward}
 \end{equation}
-em que $\beta$ é um coeficiente de balanceamento entre os dois termos.
+where $\beta$ is a coefficient balancing the two terms.
 
-O termo extrínseco penaliza células de baixo fluxo de travessia. Seja
-$\tau(v)$ o fluxo acumulado de travessia da célula $v$ ao longo de uma
-janela de $N$ episódios, e $\theta_\tau$ um limiar abaixo do qual uma célula
-é considerada um gargalo. Definimos
+The extrinsic term penalizes cells with low traversal flow. Let $\tau(v)$
+be the accumulated traversal flow of cell $v$ over a window of $N$
+episodes, and $\theta_\tau$ a threshold below which a cell is considered a
+bottleneck. We define
 \begin{equation}
   r^{\text{ext}}_t = -\sum_{v \,\in\, \mathcal{V}(s_t)} w(v) \cdot
     \mathbb{1}\!\left[\tau(v) < \theta_\tau\right],
   \label{eq:reward-ext}
 \end{equation}
-em que $\mathcal{V}(s_t)$ é a vizinhança imediata da posição do agente em
-$s_t$ e $w(v)$ é um peso proporcional à centralidade da célula $v$ no grafo
-de navegação -- de modo que gargalos em rotas centrais sejam penalizados mais
-fortemente do que gargalos em regiões marginais do mapa.
+where $\mathcal{V}(s_t)$ is the immediate neighborhood of the agent's
+position in $s_t$ and $w(v)$ is a weight proportional to the centrality of
+cell $v$ in the navigation graph -- so that bottlenecks on central routes
+are penalized more strongly than bottlenecks in marginal regions of the
+map.
 
-O termo intrínseco segue a formulação do ICM~\cite{pathak2017curiosity}: um
-modelo preditivo $f_\psi$ estima a representação latente do próximo estado,
-$\hat{z}_{t+1} = f_\psi(z_t, a_t)$, e o erro de predição é utilizado como
-recompensa,
+The intrinsic term follows the ICM formulation~\cite{pathak2017curiosity}:
+a predictive model $f_\psi$ estimates the latent representation of the next
+state, $\hat{z}_{t+1} = f_\psi(z_t, a_t)$, and the prediction error is used
+as a reward,
 \begin{equation}
   r^{\text{int}}_t = \frac{\eta}{2} \, \lVert \hat{z}_{t+1} - z_{t+1}
     \rVert_2^2,
   \label{eq:reward-int}
 \end{equation}
-em que $\eta$ é uma constante de escala. A intuição é que regiões do nível
-cuja dinâmica é mal modelada pelo agente -- tipicamente regiões pouco
-visitadas, como gargalos -- geram maior erro de predição e, portanto, maior
-recompensa intrínseca, complementando o sinal extrínseco da
-Equação~\eqref{eq:reward-ext} durante as fases iniciais do treinamento, em
-que as estimativas de $\tau(v)$ ainda são ruidosas.
+where $\eta$ is a scaling constant. The intuition is that regions of the
+level whose dynamics are poorly modeled by the agent -- typically
+seldom-visited regions, such as bottlenecks -- produce a larger prediction
+error and therefore a larger intrinsic reward, complementing the extrinsic
+signal of Equation~\eqref{eq:reward-ext} during the early stages of
+training, when the estimates of $\tau(v)$ are still noisy.
 
-\subsection{Exemplo Ilustrativo}
+\subsection{Illustrative Example}
 \label{sec:exemplo}
 
-Para tornar concreta a formalização anterior, considere o corredor
-hipotético representado na Figura~\ref{fig:exemplo-grid}: uma matriz $5
-\times 3$ na qual a célula central da coluna do meio é o único ponto de
-passagem entre a metade esquerda e a metade direita do nível.
+To make the formalization above concrete, consider the hypothetical
+corridor shown in Figure~\ref{fig:exemplo-grid}: a $5 \times 3$ matrix in
+which the center cell of the middle column is the only passage point
+between the left and right halves of the level.
 
 \begin{figure}
   \centering
   \begin{tikzpicture}[
       cell/.style={draw, minimum size=7mm, font=\footnotesize},
-      wall/.style={cell, fill=black!15},
-      free/.style={cell, fill=white},
-      bottleneck/.style={cell, fill=black!35}
+      wallstyle/.style={cell, fill=black!15},
+      freestyle/.style={cell, fill=white},
+      bottleneckstyle/.style={cell, fill=black!35}
     ]
-    \foreach \gx/\gy/\gkind in {0/0/wall,1/0/free,2/0/wall,0/1/free,1/1/free,2/1/free,0/2/wall,1/2/bottleneck,2/2/wall,0/3/free,1/3/free,2/3/free,0/4/wall,1/4/free,2/4/wall}{%
+    \foreach \gx/\gy/\gkind in {0/0/wallstyle,1/0/freestyle,2/0/wallstyle,0/1/freestyle,1/1/freestyle,2/1/freestyle,0/2/wallstyle,1/2/bottleneckstyle,2/2/wallstyle,0/3/freestyle,1/3/freestyle,2/3/freestyle,0/4/wallstyle,1/4/freestyle,2/4/wallstyle}{%
       \node[\gkind] at (\gx*0.9,-\gy*0.9) {};
     }
-    \node[font=\footnotesize] at (1*0.9,-2*0.9) {\textbf{G}};
+    \node[font=\footnotesize] at (1*0.9,-2*0.9) {\textbf{B}};
   \end{tikzpicture}
-  \caption{Exemplo ilustrativo de gargalo estrutural: células cinza-claras
-    são paredes, células brancas são caminho livre, e a célula cinza-escura
-    marcada com ``G'' é o único ponto de passagem entre as duas metades do
-    nível.}
-  \Description{Grade de 5 linhas por 3 colunas representando um corredor.
-  As colunas das extremidades alternam entre parede e caminho livre nas
-  linhas superior e inferior, enquanto a coluna central possui uma única
-  célula de passagem, destacada e marcada com a letra G, conectando as
-  duas metades do nível.}
+  \caption{Illustrative example of a structural bottleneck: light-gray
+    cells are walls, white cells are free path, and the dark-gray cell
+    marked ``B'' is the only passage point between the two halves of the
+    level.}
+  \Description{A 5-row by 3-column grid representing a corridor. The
+  outer columns alternate between wall and free path in the top and
+  bottom rows, while the center column has a single passage cell,
+  highlighted and marked with the letter B, connecting the two halves of
+  the level.}
   \label{fig:exemplo-grid}
 \end{figure}
 
-Nesse exemplo, um agente de navegação ingênuo (por exemplo, treinado
-apenas com recompensa esparsa por atingir a saída) tende a atravessar a
-célula \textbf{G} com a mesma frequência que qualquer outra célula do
-caminho, uma vez que ela é, por definição, o único caminho possível --
-não há, portanto, sinal de que essa célula seja estruturalmente diferente
-das demais apenas observando a frequência de visitação. É por isso que a
-Equação~\eqref{eq:reward-ext} pondera o fluxo $\tau(v)$ pela centralidade
-$w(v)$ da célula no grafo de navegação: a célula \textbf{G} possui
-centralidade de intermediação (\emph{betweenness centrality}) muito mais
-alta do que as demais células do corredor, pois todo caminho entre as duas
-metades do nível necessariamente passa por ela. Um valor de $\tau(v)$
-comparável ao das demais células livres, combinado com um peso $w(v)$
-elevado, é o que sinaliza \textbf{G} como um gargalo estrutural relevante,
-e não apenas mais uma célula de passagem. Em corredores com múltiplos
-caminhos alternativos, por outro lado, a centralidade de cada célula
-individual tende a ser menor, e um gargalo só emerge quando o fluxo
-observado $\tau(v)$ cai significativamente abaixo do esperado para células
-de centralidade comparável -- é essa combinação entre topologia estática
-($w(v)$) e comportamento dinâmico observado ($\tau(v)$) que buscamos
-capturar com a função de recompensa proposta, e que uma heurística
-puramente estrutural (que considerasse apenas $w(v)$) não conseguiria
-distinguir sozinha.
+In this example, a naive navigation agent (for example, one trained only
+with a sparse reward for reaching the exit) tends to cross cell
+\textbf{B} with the same frequency as any other cell along the path, since
+it is, by definition, the only possible route -- there is therefore no
+signal that this cell is structurally different from the others simply by
+observing visitation frequency. This is why Equation~\eqref{eq:reward-ext}
+weights the flow $\tau(v)$ by the centrality $w(v)$ of the cell in the
+navigation graph: cell \textbf{B} has a much higher betweenness centrality
+than the other cells in the corridor, since every path between the two
+halves of the level necessarily passes through it. A value of $\tau(v)$
+comparable to that of the other free cells, combined with a high $w(v)$, is
+what flags \textbf{B} as a relevant structural bottleneck, rather than just
+another passage cell. In corridors with multiple alternative paths, on the
+other hand, the centrality of each individual cell tends to be lower, and a
+bottleneck only emerges when the observed flow $\tau(v)$ falls
+significantly below what is expected for cells of comparable centrality --
+it is this combination of static topology ($w(v)$) and observed dynamic
+behavior ($\tau(v)$) that we aim to capture with the proposed reward
+function, and that a purely structural heuristic (considering only $w(v)$)
+could not distinguish on its own.
 
-\section{Arquitetura do Sistema}
+\section{System Architecture}
 \label{sec:arquitetura}
 
-A Figura~\ref{fig:pipeline} ilustra o pipeline proposto, do ambiente Godot
-até a política de ação, passando pelos três componentes descritos a seguir.
+Figure~\ref{fig:pipeline} illustrates the proposed pipeline, from the Godot
+environment to the action policy, passing through the components described
+below. Unless stated otherwise, every architectural and hyperparameter
+choice in this section is a \emph{proposed} design decision for the
+upcoming implementation, not a value obtained from a completed experiment.
 
 \begin{figure}
   \centering
@@ -416,349 +418,499 @@ até a política de ação, passando pelos três componentes descritos a seguir.
       arrow/.style={-{Latex[length=2mm]}, thick}
     ]
     \node[box] (godot) {Godot 4.7\\\texttt{TileMap} +\\\texttt{NavigationServer2D}};
-    \node[box, below=of godot] (grid) {Matriz 2D\\$G_t \in \{0,1\}^{H\times W}$};
+    \node[box, below=of godot] (grid) {2D matrix\\$G_t \in \{0,1\}^{H\times W}$};
     \node[box, below=of grid] (cnn) {CNN\\$\phi(G_t) = z_t$};
-    \node[box, below=of cnn] (drl) {Agente DRL\\(política + ICM)};
-    \node[box, below=of drl] (action) {Ação $a_t$\\(navegação / edição)};
+    \node[box, below=of cnn] (drl) {DRL agent\\(policy + ICM)};
+    \node[box, below=of drl] (action) {Action $a_t$\\(navigation / editing)};
     \draw[arrow] (godot) -- (grid);
     \draw[arrow] (grid) -- (cnn);
     \draw[arrow] (cnn) -- (drl);
     \draw[arrow] (drl) -- (action);
     \draw[arrow] (action.east) -- ++(1.1,0) |- (godot.east);
   \end{tikzpicture}
-  \caption{Pipeline proposto: extração da matriz do nível, processamento
-    espacial via CNN, decisão do agente de DRL e retroalimentação da ação
-    para o ambiente Godot.}
-  \Description{Diagrama de fluxo vertical mostrando quatro etapas
-    conectadas por setas: Godot com TileMap e NavigationServer2D produz uma
-    matriz 2D; a matriz é processada por uma CNN, gerando um vetor latente;
-    esse vetor alimenta o agente de aprendizado por reforço profundo, que
-    produz uma ação; a ação retroalimenta o ambiente Godot, fechando o
-    ciclo.}
+  \caption{Proposed pipeline: extraction of the level matrix, spatial
+    processing via CNN, the DRL agent's decision, and feedback of the
+    action to the Godot environment.}
+  \Description{Vertical flow diagram showing four stages connected by
+    arrows: Godot with TileMap and NavigationServer2D produces a 2D
+    matrix; the matrix is processed by a CNN, producing a latent vector;
+    that vector feeds the deep reinforcement learning agent, which
+    produces an action; the action feeds back into the Godot environment,
+    closing the loop.}
   \label{fig:pipeline}
 \end{figure}
 
-\subsection{Ambiente de Desenvolvimento}
+\subsection{Development Environment}
 
-O ambiente de desenvolvimento está sendo estruturado na engine
-Godot~4.7~\cite{godotengine}, escolhida por seu suporte nativo a física 2D
-determinística, seu sistema de navegação (\texttt{NavigationServer2D}) e a
-facilidade de introspecção de dados de cena via GDScript, o que permite
-extrair a representação estruturada do nível sem a necessidade de
-processamento de imagem.
+The development environment is being built on the
+Godot~4.7~\cite{godotengine} engine, chosen for its native support for
+deterministic 2D physics, its navigation system
+(\texttt{NavigationServer2D}), and the ease of introspecting scene data via
+GDScript, which allows the structured level representation to be extracted
+without any image-processing step.
 
-\subsection{Representação do Ambiente}
+\subsection{Environment Representation}
 \label{sec:representacao-ambiente}
 
-Após avaliação da melhor estratégia de \emph{input} para a IA, descartou-se
-o uso de imagens diretas da câmera (renderização de pixels): o
-processamento de texturas e iluminação adicionaria um custo computacional
-desnecessário à rede neural, sem agregar informação relevante para a tarefa
-de identificação de gargalos, que é fundamentalmente estrutural, e não
-visual.
+After evaluating the best input strategy for the AI, we discarded the use
+of direct camera images (pixel rendering): processing textures and
+lighting would add unnecessary computational cost to the neural network,
+without contributing information relevant to the bottleneck-identification
+task, which is fundamentally structural, not visual.
 
-A solução estabelecida é a extração estruturada do mapa na forma de uma
-matriz 2D (\emph{grid}). Utilizando os recursos do Godot 4.7, mapeia-se o
-\texttt{TileMap} e as malhas do \texttt{NavigationServer2D} para gerar um
-\emph{array} bidimensional cujos valores representam os estados do
-terreno:
+The established solution is the structured extraction of the map as a 2D
+matrix (\emph{grid}). Using Godot~4.7's built-in features, the
+\texttt{TileMap} and the \texttt{NavigationServer2D} meshes are mapped to
+produce a two-dimensional array whose values represent terrain states:
 \begin{itemize}
-  \item \textbf{0}: caminho livre e navegável;
-  \item \textbf{1}: parede ou obstáculo rígido.
+  \item \textbf{0}: free, navigable path;
+  \item \textbf{1}: wall or rigid obstacle.
 \end{itemize}
 
-Nesta etapa do projeto arquitetural, a geração dessa matriz limpa pelo
-Godot foi isolada como uma ``caixa preta'' já funcional, permitindo
-dedicação integral à modelagem da IA. A codificação binária inicial
-($\{0,1\}$) foi escolhida por sua simplicidade; canais adicionais (posição
-do agente, distância à saída, densidade histórica de tráfego) poderão ser
-concatenados como planos extras da mesma matriz sem alterar a arquitetura
-do extrator convolucional, apenas o número de canais de entrada.
+At this stage of the architectural project, the generation of this clean
+matrix by Godot has been isolated as an already-functional ``black box'',
+allowing full attention to be devoted to modeling the AI. The initial
+binary encoding ($\{0,1\}$) was chosen for its simplicity; additional
+channels (agent position, distance to exit, historical traffic density)
+can later be concatenated as extra planes of the same matrix without
+changing the convolutional extractor's architecture, only the number of
+input channels.
 
-\subsection{Processamento Espacial com Redes Convolucionais}
+\subsection{Convolutional Feature Extractor: Proposed Architecture}
 \label{sec:cnn}
 
-A matriz 2D gerada atua como a observação (\emph{state}) para a rede
-neural. Para extrair os padrões topológicos desse ambiente espacial ---
-como corredores estreitos, rotas críticas e densidade de obstáculos --- os
-dados passam por uma \emph{Deep Convolutional
-Network}~\cite{lecun1998gradient} (CNN). A natureza das CNNs permite que o
-modelo compreenda o nível de forma geométrica, em vez de apenas ler números
-isolados, o que é essencial para reconhecer padrões espaciais que
-caracterizam um gargalo.
+The generated 2D matrix acts as the observation (\emph{state}) for the
+neural network. To extract the topological patterns of this spatial
+environment -- such as narrow corridors, critical routes, and obstacle
+density -- the data is proposed to pass through a Deep Convolutional
+Network~\cite{lecun1998gradient} (CNN). The nature of CNNs allows the model
+to understand the level geometrically, rather than merely reading isolated
+numbers, which is essential for recognizing the spatial patterns that
+characterize a bottleneck.
 
-O projeto atual do extrator segue o padrão consolidado por trabalhos de RL
-sobre grades (\emph{grid-world}), com camadas convolucionais de
-\emph{stride} $1$ e \emph{kernels} pequenos ($3\times3$), preservando a
-granularidade de \emph{tile} necessária para localizar precisamente um
-gargalo, seguidas de uma camada totalmente conectada que produz o vetor
-latente $z_t \in \mathbb{R}^d$ utilizado pela política e pelo módulo de
-curiosidade. Optamos por não utilizar operações de \emph{max-pooling}
-agressivas, que tenderiam a borrar exatamente as estruturas finas
-(corredores de largura igual a um \emph{tile}) que o sistema precisa
-detectar.
-
-\subsection{Agente de Deep Reinforcement Learning}
-
-A tomada de decisão e a exploração do mapa utilizam uma arquitetura de
-Aprendizado por Reforço Profundo. O modelo é construído com base em
-conceitos avançados da literatura, unindo \emph{Curiosity-Driven
-Exploration}~\cite{pathak2017curiosity} com as bases do
-PCGRL~\cite{khalifa2020pcgrl}. A Tabela~\ref{tab:drl} resume os três
-componentes centrais do sistema segundo a formalização apresentada na
-Seção~\ref{sec:formalizacao}.
+Table~\ref{tab:cnn-arch} specifies the proposed feature-extractor
+architecture, following the pattern established by grid-world RL work: small
+$3\times3$ kernels with stride~$1$, preserving the tile granularity needed
+to precisely localize a bottleneck. We deliberately avoid aggressive
+max-pooling operations, which would tend to blur exactly the fine
+structures (corridors one tile wide) that the system needs to detect.
 
 \begin{table}
-  \caption{Componentes do sistema de Aprendizado por Reforço Profundo}
-  \label{tab:drl}
-  \begin{tabular}{p{0.28\linewidth}p{0.6\linewidth}}
+  \caption{Proposed convolutional feature extractor $\phi(\cdot)$. Input:
+    $G_t \in \{0,1\}^{C \times H \times W}$, with $C=1$ initially.}
+  \label{tab:cnn-arch}
+  \begin{tabular}{lllll}
     \toprule
-    \textbf{Componente} & \textbf{Estratégia no projeto} \\
+    \textbf{Layer} & \textbf{Filters/Units} & \textbf{Kernel} & \textbf{Stride} & \textbf{Act.} \\
     \midrule
-    Observação (\emph{State}) & A matriz 2D processada pela CNN,
-      representando a topologia instantânea da fase ($z_t = \phi(G_t)$). \\
-    Ação (\emph{Action}) & Navegação vetorial discreta e, posteriormente, a
-      capacidade de sinalizar ou modificar tiles (adicionar/remover
-      bloqueios). \\
-    Recompensa (\emph{Reward}) & Combinação extrínseca/intrínseca: penaliza
-      fortemente áreas de baixo fluxo de travessia (gargalos) e recompensa
-      a exploração de regiões mal modeladas pelo agente. \\
+    Conv1 & 32  & $3\times3$ & 1 & ReLU \\
+    Conv2 & 64  & $3\times3$ & 1 & ReLU \\
+    Conv3 & 64  & $3\times3$ & 1 & ReLU \\
+    Flatten & -- & -- & -- & -- \\
+    FC1 (features) & 256 & -- & -- & ReLU \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Quanto ao algoritmo de otimização de política, optamos por explorar
-\emph{Proximal Policy Optimization}
-(PPO)~\cite{schulman2017proximal}, em vez de métodos baseados em valor como
-\emph{Deep Q-Networks}. Essa escolha se justifica por três razões: (i) o
-espaço de ações proposto na Seção~\ref{sec:acao} é naturalmente discreto,
-mas será estendido a variações contínuas de intensidade de edição em fases
-futuras, e o PPO acomoda ambos os casos sem mudança estrutural; (ii) o PPO
-é conhecido por sua estabilidade de treinamento em cenários com recompensas
-esparsas e ruidosas -- exatamente o cenário esperado ao combinar os termos
-extrínseco e intrínseco da Equação~\eqref{eq:reward}; e (iii) sua natureza
-\emph{on-policy} simplifica a integração com o módulo de curiosidade, que
-depende de trajetórias recentes e consistentes com a política atual para
-que o erro de predição do modelo dinâmico seja informativo.
+The output of FC1 is the latent feature vector $z_t \in \mathbb{R}^{256}$
+($d=256$), shared between the policy/value networks and the curiosity
+module described below.
 
-\subsection{Integração de Dados e Pipeline de Treinamento}
+\subsection{Policy and Value Networks}
+\label{sec:policy-net}
 
-A integração entre o ambiente Godot e o ambiente de treinamento (Python)
-está planejada por meio de um protocolo de comunicação por sockets locais,
-no qual o Godot exporta, a cada \emph{step} de simulação, a matriz $G_t$
-serializada e recebe de volta a ação $a_t$ escolhida pela política. Essa
-separação de processos permite que o treinamento seja acelerado por
-hardware dedicado (GPU) sem sobrecarregar o laço de renderização e física
-do motor de jogo, e permite, no futuro, paralelizar múltiplas instâncias do
-ambiente para acelerar a coleta de trajetórias, uma prática comum em
-\emph{pipelines} de RL profundo.
-
-\section{Estado Atual da Implementação}
-\label{sec:estado}
-
-Com a comunicação base e o escopo da IA (matriz 2D~$\rightarrow$~CNN~$
-\rightarrow$~DRL) validados e definidos, o projeto avança para a
-estruturação formal do aprendizado de máquina. Até o momento:
+We propose an actor-critic architecture with a shared convolutional trunk
+$\phi(\cdot)$ (Table~\ref{tab:cnn-arch}) and two separate heads:
 \begin{itemize}
-  \item a extração da matriz 2D a partir do \texttt{TileMap} e do
-    \texttt{NavigationServer2D} foi implementada e isolada como módulo
-    independente, funcionando de forma estável para os níveis de teste
-    utilizados durante o desenvolvimento;
-  \item o desenho geral do pipeline \emph{CNN~+~DRL} (Seção~\ref{sec:arquitetura})
-    foi definido e revisado frente à literatura de PCGRL e de exploração
-    por curiosidade;
-  \item a formalização do problema como MDP (Seção~\ref{sec:formalizacao}),
-    incluindo a proposta inicial da função de recompensa híbrida, foi
-    concluída nesta etapa do relatório; e
-  \item o treinamento do agente ainda não foi iniciado -- os itens acima
-    constituem a base arquitetural sobre a qual os experimentos descritos
-    na Seção~\ref{sec:avaliacao} serão conduzidos.
+  \item \textbf{Actor head}: a fully connected layer mapping $z_t \in
+    \mathbb{R}^{256}$ to $|\mathcal{A}|$ logits, followed by a softmax over
+    the discrete action set ($|\mathcal{A}^{\text{nav}}| = 5$ in the
+    current navigation-only phase; extended to $|\mathcal{A}^{\text{nav}}|
+    + |\mathcal{A}^{\text{edit}}| = 9$ once editing actions are added, per
+    Section~\ref{sec:acao});
+  \item \textbf{Critic head}: a fully connected layer mapping $z_t$ to a
+    single scalar, the state-value estimate $V_\omega(s_t)$, used to
+    compute the advantage estimates required by PPO.
 \end{itemize}
 
-\section{Metodologia de Avaliação Proposta}
+\subsection{Intrinsic Curiosity Module: Proposed Architecture}
+\label{sec:icm-arch}
+
+Following Pathak et~al.~\cite{pathak2017curiosity}, the ICM reuses the
+feature encoder $\phi(\cdot)$ and adds two small networks:
+\begin{itemize}
+  \item \textbf{Inverse model}: takes the concatenation of $z_t$ and
+    $z_{t+1}$ ($512$ units), passes it through one fully connected hidden
+    layer of $256$ units (ReLU), and predicts the action $a_t$ that
+    produced the transition, via a softmax output over
+    $\mathcal{A}^{\text{nav}}$. It is trained with a cross-entropy loss
+    $L_I$, and its role is to shape $\phi(\cdot)$ so that $z_t$ only
+    encodes features relevant to the agent's own actions, ignoring
+    aspects of the environment the agent cannot control;
+  \item \textbf{Forward model} ($f_\psi$): takes the concatenation of $z_t$
+    and a one-hot encoding of $a_t$ ($256 + |\mathcal{A}^{\text{nav}}|$
+    units), passes it through one fully connected hidden layer of $256$
+    units (ReLU), and predicts $\hat{z}_{t+1}$. It is trained by minimizing
+    the mean-squared error between $\hat{z}_{t+1}$ and $z_{t+1}$, which is
+    exactly the quantity used as the intrinsic reward in
+    Equation~\eqref{eq:reward-int}.
+\end{itemize}
+The combined ICM training loss follows the standard weighting proposed by
+Pathak et~al.:
+\begin{equation}
+  L_{\text{ICM}} = (1-\lambda)\, L_I + \lambda\, L_F,
+  \label{eq:icm-loss}
+\end{equation}
+with $\lambda = 0.8$ as the literature-informed reference value, giving
+more weight to the forward-model loss $L_F$ (which directly produces the
+intrinsic reward) while still using the inverse-model loss $L_I$ to keep
+the learned features action-relevant.
+
+\subsection{Deep Reinforcement Learning Agent and Proposed Hyperparameters}
+\label{sec:drl-hparams}
+
+The agent's decision-making and map exploration rely on a Deep
+Reinforcement Learning architecture, combining Curiosity-Driven
+Exploration~\cite{pathak2017curiosity} with the foundations of
+PCGRL~\cite{khalifa2020pcgrl}. Table~\ref{tab:drl} summarizes the three
+central components of the system per the formalization presented in
+Section~\ref{sec:formalizacao}.
+
+\begin{table}
+  \caption{Components of the Deep Reinforcement Learning system}
+  \label{tab:drl}
+  \begin{tabular}{p{0.28\linewidth}p{0.6\linewidth}}
+    \toprule
+    \textbf{Component} & \textbf{Strategy in the project} \\
+    \midrule
+    Observation (\emph{State}) & The 2D matrix processed by the CNN,
+      representing the stage's instantaneous topology ($z_t = \phi(G_t)$). \\
+    Action & Discrete vectorial navigation and, later, the ability to flag
+      or modify tiles (add/remove blockages). \\
+    Reward & Extrinsic/intrinsic combination: strongly penalizes low
+      traversal-flow areas (bottlenecks) and rewards exploration of
+      regions poorly modeled by the agent. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Regarding the policy-optimization algorithm, we opt to use \emph{Proximal
+Policy Optimization} (PPO)~\cite{schulman2017proximal}, rather than
+value-based methods such as Deep Q-Networks. This choice is justified by
+three reasons: (i) the action space proposed in Section~\ref{sec:acao} is
+naturally discrete, but will be extended to continuous edit-intensity
+variations in later phases, and PPO accommodates both cases without a
+structural change; (ii) PPO is known for its training stability in
+scenarios with sparse and noisy rewards -- exactly the scenario expected
+when combining the extrinsic and intrinsic terms of
+Equation~\eqref{eq:reward}; and (iii) its on-policy nature simplifies
+integration with the curiosity module, which depends on recent
+trajectories that are consistent with the current policy so that the
+dynamics-model prediction error remains informative.
+
+Table~\ref{tab:ppo-hparams} lists the reference PPO hyperparameter
+configuration we propose as a starting point for implementation, following
+common defaults reported by Schulman et~al.~\cite{schulman2017proximal} and
+widely adopted in standard PPO implementations. These values are
+explicitly a proposed initial configuration, to be empirically tuned once
+training begins (see Section~\ref{sec:futuro}); they are not the result of
+a hyperparameter search.
+
+\begin{table}
+  \caption{Proposed reference PPO hyperparameters (starting configuration,
+    not yet tuned)}
+  \label{tab:ppo-hparams}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Proposed value} \\
+    \midrule
+    Optimizer & Adam \\
+    Learning rate & $3\times 10^{-4}$ \\
+    Discount factor $\gamma$ & $0.99$ \\
+    GAE $\lambda$ & $0.95$ \\
+    Clipping range $\varepsilon$ & $0.2$ \\
+    Rollout length (steps/env) & $2048$ \\
+    Minibatch size & $64$ \\
+    Epochs per update & $10$ \\
+    Entropy coefficient & $0.01$ \\
+    Value-loss coefficient & $0.5$ \\
+    Max gradient norm & $0.5$ \\
+    Curiosity weight $\beta$ (Eq.~\eqref{eq:reward}) & $0.01$--$0.1$ (to be calibrated) \\
+    Forward-loss scale $\eta$ (Eq.~\eqref{eq:reward-int}) & $1.0$ \\
+    ICM loss weight $\lambda$ (Eq.~\eqref{eq:icm-loss}) & $0.8$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The wide range proposed for $\beta$ reflects a known open calibration issue
+also flagged in Section~\ref{sec:discussao}: the relative scale of the
+intrinsic and extrinsic reward terms is environment-dependent and is
+expected to require empirical adjustment, rather than being fixed a
+priori.
+
+\subsection{Data Integration and Training Pipeline}
+
+Integration between the Godot environment and the training environment
+(Python) is planned via a local-socket communication protocol, in which
+Godot exports, at every simulation \emph{step}, the serialized matrix $G_t$
+and receives back the action $a_t$ chosen by the policy. This process
+separation allows training to be accelerated by dedicated hardware (GPU)
+without overloading the game engine's rendering and physics loop, and will
+later allow multiple environment instances to be parallelized to speed up
+trajectory collection, a common practice in deep RL pipelines.
+
+\section{Current Implementation Status}
+\label{sec:estado}
+
+With the base communication layer and the AI scope (2D matrix
+$\rightarrow$ CNN $\rightarrow$ DRL) validated and defined, the project is
+moving toward the formal structuring of the machine-learning components.
+As of this writing:
+\begin{itemize}
+  \item the extraction of the 2D matrix from the \texttt{TileMap} and the
+    \texttt{NavigationServer2D} has been implemented and isolated as an
+    independent module;
+  \item \textbf{preliminary validation performed}: for the handful of test
+    levels used during development, the extracted matrix was manually
+    inspected and confirmed to match the corresponding \texttt{TileMap}
+    layout cell-by-cell; this is a functional/qualitative sanity check of
+    the extraction module, not a performance evaluation of the agent, since
+    no agent has been trained yet;
+  \item the overall design of the CNN~+~DRL pipeline
+    (Section~\ref{sec:arquitetura}), including the concrete network
+    architecture and the reference PPO hyperparameters, has been defined
+    and cross-checked against the PCGRL and curiosity-driven-exploration
+    literature;
+  \item the formalization of the problem as an MDP
+    (Section~\ref{sec:formalizacao}), including the initial hybrid reward
+    function proposal, was completed at this stage of the report; and
+  \item \textbf{agent training has not yet started}: no PPO run, no
+    learning curve, and no bottleneck-detection accuracy number exists at
+    the time of writing. The items above constitute the architectural
+    groundwork on which the experiments described in
+    Section~\ref{sec:avaliacao} will be conducted.
+\end{itemize}
+
+\section{Proposed Evaluation Methodology}
 \label{sec:avaliacao}
 
-Como o treinamento do agente ainda está em fase de estruturação, esta
-seção descreve a metodologia de avaliação planejada para os próximos
-ciclos do projeto, e não resultados experimentais já obtidos.
+Since agent training is still in the design stage, this section describes
+the evaluation methodology planned for the next project cycles, and
+\textbf{not} experimental results already obtained. No test run of the
+full agent has been performed; the metrics, baselines, and protocol below
+define what will be measured once training begins, not what has been
+measured so far.
 
-\subsection{Métricas}
+\subsection{Metrics}
 
-Propomos as seguintes métricas para avaliar a capacidade do agente de
-identificar gargalos:
+We propose the following metrics, with explicit formulas, to evaluate the
+agent's ability to identify bottlenecks. Let $\hat{B}$ be the set of cells
+flagged by the agent as bottlenecks and $B^\star$ the set of cells
+identified as bottlenecks by human experts on a manually annotated
+reference-level set. Define true positives $TP = |\hat{B} \cap B^\star|$,
+false positives $FP = |\hat{B} \setminus B^\star|$, and false negatives
+$FN = |B^\star \setminus \hat{B}|$.
+
 \begin{itemize}
-  \item \textbf{Precisão de detecção}: fração das células sinalizadas pelo
-    agente como gargalo que coincidem com gargalos identificados por
-    especialistas humanos em um conjunto de níveis de referência anotados
-    manualmente;
-  \item \textbf{Cobertura (\emph{recall})}: fração dos gargalos anotados
-    manualmente que são efetivamente sinalizados pelo agente;
-  \item \textbf{Entropia do mapa de visitação}: dispersão espacial das
-    trajetórias do agente ao longo de um episódio, utilizada como
-    \emph{proxy} para verificar se a exploração guiada por curiosidade está
-    de fato cobrindo regiões de baixo fluxo, e não apenas reforçando rotas
-    já bem conhecidas; e
-  \item \textbf{Redução de gargalos pós-edição}: para a fase futura de
-    ações de edição (Seção~\ref{sec:acao}), a variação do fluxo de
-    travessia $\tau(v)$ antes e depois das intervenções sugeridas pelo
-    agente.
+  \item \textbf{Detection precision}:
+  \begin{equation}
+    \text{Precision} = \frac{TP}{TP + FP}.
+    \label{eq:precision}
+  \end{equation}
+
+  \item \textbf{Coverage (recall)}:
+  \begin{equation}
+    \text{Recall} = \frac{TP}{TP + FN}.
+    \label{eq:recall}
+  \end{equation}
+
+  \item \textbf{$F_1$ score}, summarizing precision and recall in a single
+    number:
+  \begin{equation}
+    F_1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}
+      {\text{Precision} + \text{Recall}}.
+    \label{eq:f1}
+  \end{equation}
+
+  \item \textbf{Visitation-map entropy}: let $p(v) = \text{visits}(v) /
+    \sum_{u} \text{visits}(u)$ be the empirical visitation distribution
+    over grid cells during an episode. The Shannon entropy
+  \begin{equation}
+    H = -\sum_{v} p(v) \log p(v)
+    \label{eq:entropy}
+  \end{equation}
+    is used as a proxy to check whether curiosity-guided exploration is
+    indeed covering low-flow regions, rather than merely reinforcing
+    already well-known routes: a higher $H$ indicates a more spatially
+    dispersed visitation pattern.
+
+  \item \textbf{Post-editing bottleneck reduction}: for the future editing-action
+    phase (Section~\ref{sec:acao}), the relative change in traversal flow
+    $\tau(v)$ before and after the agent's suggested interventions,
+  \begin{equation}
+    \Delta\tau(v) = \frac{\tau_{\text{after}}(v) - \tau_{\text{before}}(v)}
+      {\tau_{\text{before}}(v)},
+    \label{eq:delta-tau}
+  \end{equation}
+    with $\Delta\tau(v) > 0$ indicating that the intervention increased
+    traversal flow through a previously identified bottleneck cell.
 \end{itemize}
 
 \subsection{Baselines}
 
-Como referência de comparação, planejamos incluir:
+As a comparison reference, we plan to include:
 \begin{itemize}
-  \item um agente aleatório, que executa ações de navegação uniformemente
-    ao acaso, para calibrar o piso de desempenho das métricas acima;
-  \item um agente de \emph{pathfinding} clássico (busca A* sobre o grafo de
-    navegação), que representa a linha de base ``sem aprendizado'' e
-    permite isolar o ganho específico atribuível ao componente de DRL; e
-  \item uma variante do próprio agente proposto sem o termo intrínseco de
-    curiosidade ($\beta = 0$ na Equação~\eqref{eq:reward}), para medir a
-    contribuição isolada da exploração guiada por curiosidade em relação à
-    recompensa puramente extrínseca.
+  \item a random agent, executing navigation actions uniformly at random,
+    to calibrate the performance floor for the metrics above;
+  \item a classical \emph{pathfinding} agent (A* search over the navigation
+    graph), representing the ``no-learning'' baseline and allowing the
+    specific gain attributable to the DRL component to be isolated; and
+  \item a variant of the proposed agent itself without the intrinsic
+    curiosity term ($\beta = 0$ in Equation~\eqref{eq:reward}), to measure
+    the isolated contribution of curiosity-guided exploration relative to
+    a purely extrinsic reward.
 \end{itemize}
 
-\subsection{Protocolo Experimental}
+\subsection{Experimental Protocol}
 
-O protocolo planejado consiste em treinar cada configuração do agente em um
-conjunto fixo de níveis de treinamento, avaliando periodicamente em um
-conjunto de validação de níveis não vistos durante o treinamento, de forma a
-verificar a generalização da política para topologias distintas das
-utilizadas no treinamento -- um requisito essencial para que a ferramenta
-seja útil em cenários reais de \emph{level design}, nos quais o agente deve
-avaliar níveis inéditos, e não apenas os níveis sobre os quais foi treinado.
-Cada configuração será executada com múltiplas sementes aleatórias para
-permitir a análise de variância entre execuções, prática recomendada na
-literatura de aprendizado por reforço~\cite{sutton2018reinforcement} dada a
-sensibilidade conhecida desses métodos à inicialização e à ordem de
-amostragem das trajetórias.
+The planned protocol consists of training each agent configuration on a
+fixed set of training levels, evaluating periodically on a validation set
+of levels not seen during training, in order to verify the policy's
+generalization to topologies different from those used in training -- an
+essential requirement for the tool to be useful in real level-design
+scenarios, where the agent must evaluate novel levels, not only the levels
+it was trained on. Each configuration will be run with multiple random
+seeds to allow variance analysis across runs, a practice recommended in
+the reinforcement-learning literature~\cite{sutton2018reinforcement} given
+the well-known sensitivity of these methods to initialization and to the
+sampling order of trajectories.
 
-\section{Discussão: Limitações e Riscos}
+\section{Discussion: Limitations and Risks}
 \label{sec:discussao}
 
-Ainda que a arquitetura proposta seja promissora, alguns riscos
-metodológicos merecem discussão explícita nesta etapa do projeto.
+Although the proposed architecture is promising, some methodological risks
+deserve explicit discussion at this stage of the project.
 
-\textbf{Risco de \emph{reward hacking}.} A combinação de recompensa
-extrínseca e intrínseca (Equação~\eqref{eq:reward}) introduz o risco
-clássico de que o agente explore artefatos da própria função de recompensa
-em vez de resolver o problema pretendido -- por exemplo, permanecer em
-regiões cujo modelo dinâmico é intencionalmente difícil de prever (como
-áreas com física caótica), gerando recompensa intrínseca alta sem
-corresponder a um gargalo real de \emph{design}. Mitigar esse risco exigirá
-normalização cuidadosa do termo $r^{\text{int}}_t$ e, possivelmente, seu
-decaimento ao longo do treinamento, à medida que o modelo dinâmico se torna
-mais preciso.
+\textbf{Risk of reward hacking.} Combining extrinsic and intrinsic rewards
+(Equation~\eqref{eq:reward}) introduces the classic risk that the agent
+exploits artifacts of the reward function itself instead of solving the
+intended problem -- for example, lingering in regions whose dynamics model
+is intentionally hard to predict (such as areas with chaotic physics),
+producing high intrinsic reward without corresponding to an actual design
+bottleneck. Mitigating this risk will require careful normalization of the
+$r^{\text{int}}_t$ term and, possibly, its decay over the course of
+training, as the dynamics model becomes more accurate.
 
-\textbf{Generalização entre temas visuais e topológicos.} Como a
-representação de estado é puramente estrutural (matriz binária), espera-se
-melhor generalização entre temas visuais distintos do que abordagens
-baseadas em pixels; entretanto, a generalização entre topologias
-estruturalmente muito diferentes das vistas em treinamento (por exemplo,
-níveis com geometria não ortogonal) ainda não foi avaliada e é um risco em
-aberto.
+\textbf{Generalization across visual themes and topologies.} Since the
+state representation is purely structural (a binary matrix), better
+generalization across distinct visual themes is expected than for
+pixel-based approaches; however, generalization across topologies that are
+structurally very different from those seen in training (for example,
+levels with non-orthogonal geometry) has not yet been evaluated and remains
+an open risk.
 
-\textbf{Custo computacional do treinamento distribuído.} A separação entre
-o processo do Godot e o processo de treinamento (Seção~\ref{sec:arquitetura})
-introduz sobrecarga de comunicação que pode se tornar um gargalo de
-desempenho -- de forma irônica, o próprio pipeline de treinamento pode sofrer
-do tipo de problema que o agente é treinado para detectar no nível do jogo.
-Essa sobrecarga precisará ser medida empiricamente antes de escalar o
-número de ambientes paralelos.
+\textbf{Computational cost of distributed training.} The separation
+between the Godot process and the training process (Section~\ref{sec:arquitetura})
+introduces communication overhead that could become a performance
+bottleneck itself -- somewhat ironically, the training pipeline may suffer
+from the very type of problem the agent is being trained to detect at the
+level of the game. This overhead will need to be measured empirically
+before scaling up the number of parallel environments.
 
-\textbf{Validação com especialistas humanos.} As métricas de precisão e
-cobertura propostas na Seção~\ref{sec:avaliacao} dependem da anotação manual
-de gargalos por especialistas, um processo que introduz subjetividade e que
-ainda precisa ser operacionalizado -- por exemplo, definindo um protocolo de
-anotação com múltiplos anotadores e medidas de concordância entre eles.
+\textbf{Validation with human experts.} The precision and recall metrics
+proposed in Section~\ref{sec:avaliacao} depend on manual bottleneck
+annotation by experts, a process that introduces subjectivity and still
+needs to be operationalized -- for example, by defining an annotation
+protocol with multiple annotators and inter-annotator agreement measures.
 
-\section{Considerações Éticas e de Uso Responsável}
+\section{Ethical Considerations and Responsible Use}
 \label{sec:etica}
 
-Ferramentas de diagnóstico automatizado de \emph{level design} levantam
-questões de uso responsável que merecem consideração explícita, mesmo em
-uma etapa inicial do projeto como a aqui relatada.
+Automated level-design diagnostic tools raise responsible-use questions
+that deserve explicit consideration, even at this early stage of the
+project.
 
-\textbf{Complementaridade, não substituição, do julgamento humano.} O
-sistema proposto tem como objetivo fornecer um sinal quantitativo adicional
-ao processo de \emph{design}, e não substituir o julgamento de designers
-humanos sobre o que torna um nível interessante. Um gargalo identificado
-pelo agente pode ser, em certos contextos de \emph{design} intencional
-(por exemplo, um estrangulamento tático em um mapa competitivo), uma
-característica desejada, e não um defeito a ser corrigido. A ferramenta
-deve, portanto, ser utilizada como apoio à decisão, com a palavra final
-permanecendo com a equipe de \emph{design}.
+\textbf{Complementing, not replacing, human judgment.} The proposed system
+is meant to provide an additional quantitative signal to the design
+process, not to replace human designers' judgment of what makes a level
+interesting. A bottleneck flagged by the agent may, in certain intentional
+design contexts (for example, a tactical choke point in a competitive map),
+be a desired feature rather than a defect to be corrected. The tool should
+therefore be used as decision support, with the final call remaining with
+the design team.
 
-\textbf{Viés na definição de fluidez.} A métrica de fluxo de travessia
-$\tau(v)$ e os pesos $w(v)$ de centralidade (Seção~\ref{sec:recompensa})
-embutem uma definição específica -- e necessariamente parcial -- do que
-constitui um nível ``fluido''. Essa definição pode não ser representativa
-de todos os estilos de jogo ou de todos os perfis de jogadores (por
-exemplo, jogadores que preferem exploração lenta a progressão rápida), e
-deve ser comunicada de forma transparente a quem utilizar a ferramenta,
-para evitar que recomendações automatizadas sejam interpretadas como
-verdades objetivas sobre qualidade de \emph{design}.
+\textbf{Bias in the definition of fluidity.} The traversal-flow metric
+$\tau(v)$ and the centrality weights $w(v)$ (Section~\ref{sec:recompensa})
+embed a specific -- and necessarily partial -- definition of what
+constitutes a ``fluid'' level. This definition may not be representative of
+every play style or player profile (for example, players who prefer slow
+exploration over fast progression), and should be communicated
+transparently to whoever uses the tool, so that automated recommendations
+are not interpreted as objective truths about design quality.
 
-\textbf{Dados de jogadores reais.} Na fase atual do projeto, todo o
-treinamento ocorre em simulação, sem coleta de dados de jogadores humanos.
-Caso etapas futuras incorporem dados de \emph{playtesting} real -- por
-exemplo, para calibrar $\tau(v)$ com telemetria de partidas humanas --
-será necessário um protocolo explícito de consentimento e anonimização,
-seguindo as práticas usuais de pesquisa com participantes humanos.
+\textbf{Real player data.} At the current project stage, all training
+happens in simulation, with no collection of human player data. Should
+future stages incorporate real playtesting data -- for example, to
+calibrate $\tau(v)$ with telemetry from human matches -- an explicit
+consent and anonymization protocol will be required, following standard
+practices for research with human participants.
 
-\section{Trabalhos Futuros}
+\section{Future Work}
 \label{sec:futuro}
 
-Com a arquitetura e a formalização do problema definidas, os próximos
-passos do projeto incluem:
+With the architecture and problem formalization defined, the project's
+next steps include:
 \begin{enumerate}
-  \item \textbf{Implementação da função de recompensa:} implementar e
-    calibrar experimentalmente os pesos $\beta$, $\eta$ e $\theta_\tau$ das
-    Equações~\eqref{eq:reward}--\eqref{eq:reward-int}, hoje definidos apenas
-    em nível conceitual;
-  \item \textbf{Implementação do espaço de ações de edição:} estender o
-    espaço de ações de navegação para incluir as ações de sinalização e
-    edição de tiles descritas na Seção~\ref{sec:acao};
-  \item \textbf{Integração de dados:} implementar o protocolo de
-    comunicação por sockets entre o Godot e o ambiente de treinamento
-    descrito na Seção~\ref{sec:arquitetura};
-  \item \textbf{Construção do conjunto de níveis de referência:} preparar o
-    conjunto de níveis anotados manualmente necessário para as métricas de
-    precisão e cobertura da Seção~\ref{sec:avaliacao};
-  \item \textbf{Execução dos experimentos-piloto:} treinar as primeiras
-    versões do agente e dos \emph{baselines} propostos, permitindo uma
-    primeira validação empírica -- ainda que preliminar -- da arquitetura
-    descrita neste artigo; e
-  \item \textbf{Extensão para mecânicas multiplayer:} avaliar como o fluxo
-    de travessia $\tau(v)$ deve ser redefinido quando múltiplos agentes
-    ocupam o mesmo nível simultaneamente, disputando o mesmo espaço físico.
+  \item \textbf{Reward function implementation:} implement and
+    experimentally calibrate the weights $\beta$, $\eta$, and $\theta_\tau$
+    of Equations~\eqref{eq:reward}--\eqref{eq:reward-int}, currently
+    defined only at a conceptual level;
+  \item \textbf{Editing action space implementation:} extend the
+    navigation action space to include the tile flagging and editing
+    actions described in Section~\ref{sec:acao};
+  \item \textbf{Data integration:} implement the socket-based communication
+    protocol between Godot and the training environment described in
+    Section~\ref{sec:arquitetura};
+  \item \textbf{Reference level set construction:} prepare the manually
+    annotated level set required for the precision and recall metrics in
+    Section~\ref{sec:avaliacao};
+  \item \textbf{Pilot experiments:} train the first versions of the agent
+    and of the proposed baselines, enabling a first -- still preliminary --
+    empirical validation of the architecture described in this article; and
+  \item \textbf{Extension to multiplayer mechanics:} evaluate how the
+    traversal flow $\tau(v)$ should be redefined when multiple agents
+    occupy the same level simultaneously, competing for the same physical
+    space.
 \end{enumerate}
 
-\section{Conclusão}
+\section{Conclusion}
 \label{sec:conclusao}
 
-Este artigo relatou o andamento e a arquitetura em desenvolvimento de um
-agente de Aprendizado por Reforço Profundo para identificação e correção de
-gargalos de \emph{level design} em jogos 2D construídos na engine Godot. A
-representação do ambiente como matriz 2D, processada por uma CNN e
-consumida por um agente de DRL inspirado em PCGRL e em exploração guiada
-por curiosidade, oferece um caminho concreto para ir além do
-\emph{pathfinding} tradicional. Formalizamos o problema como um Processo de
-Decisão de Markov, propusemos uma função de recompensa híbrida
-extrínseca/intrínseca e delineamos uma metodologia de avaliação -- com
-métricas, \emph{baselines} e protocolo experimental -- para os próximos
-ciclos do projeto. Discutimos também os riscos metodológicos mais
-relevantes, em particular o risco de \emph{reward hacking} inerente ao uso
-de recompensas intrínsecas. Os trabalhos futuros mais imediatos --
-implementação da função de recompensa, do espaço de ações de edição e da
-integração de dados -- consolidarão a base necessária para os primeiros
-experimentos-piloto de treinamento do agente.
+This article reported on the progress and the architecture under
+development of a Deep Reinforcement Learning agent for identifying and
+correcting level-design bottlenecks in 2D games built on the Godot engine.
+Representing the environment as a 2D matrix, processed by a CNN and
+consumed by a DRL agent inspired by PCGRL and curiosity-guided exploration,
+offers a concrete path beyond traditional pathfinding. We formalized the
+problem as a Markov Decision Process, specified a concrete network
+architecture (convolutional feature extractor, actor-critic heads, and
+Intrinsic Curiosity Module) together with a reference set of PPO
+hyperparameters, and outlined an evaluation methodology -- with explicitly
+defined metrics, baselines, and an experimental protocol -- for the next
+project cycles. We emphasize that, at the time of writing, no training
+experiments have been run and no performance results exist; every
+architectural and hyperparameter choice presented here is a proposal to be
+validated and tuned empirically. We also discussed the most relevant
+methodological risks, in particular the risk of reward hacking inherent to
+the use of intrinsic rewards. The most immediate future work -- reward
+function implementation, editing action space, and data integration --
+will build the necessary foundation for the first pilot training
+experiments.
 
 \begin{acks}
-Agradecemos ao Prof.\ Augusto Baffa pela orientação ao longo do
-desenvolvimento deste projeto, no âmbito da disciplina Projeto Orientado IV
-(INF1824) da PUC-Rio.
+We thank Prof.\ Augusto Baffa for his guidance throughout the development
+of this project, as part of the Projeto Orientado IV (INF1824) course at
+PUC-Rio.
 \end{acks}
 
 \label{fim-conteudo}
